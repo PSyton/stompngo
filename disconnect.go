@@ -16,6 +16,8 @@
 
 package stompngo
 
+import "sync/atomic"
+
 /*
 	Disconnect from a STOMP broker.
 
@@ -46,12 +48,14 @@ package stompngo
 
 */
 func (c *Connection) Disconnect(h Headers) error {
-	c.discLock.Lock()
-	defer c.discLock.Unlock()
-	//
-	if !c.connected {
+	if !c.Connected() {
 		return ECONBAD
 	}
+
+	if !atomic.CompareAndSwapInt32(&c.disconnect, 0, 1) {
+		return ECONBAD
+	}
+	//
 	c.log(DISCONNECT, "start", h)
 	e := checkHeaders(h, c.Protocol())
 	if e != nil {

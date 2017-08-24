@@ -17,9 +17,9 @@
 package stompngo
 
 import (
-	"fmt"
 	"strconv"
 	"strings"
+	"sync/atomic"
 	"time"
 )
 
@@ -44,7 +44,7 @@ func (c *Connection) initializeHeartBeats(ch Headers) (e error) {
 	w := &heartBeatData{cx: 0, cy: 0, sx: 0, sy: 0,
 		hbs: true, hbr: true, // possible reset later
 		sti: 0, rti: 0,
-		ls: 0, lr: 0}
+		sc: 0, rc: 0}
 
 	// Client specified values
 	cp := strings.Split(vc, ",")
@@ -91,27 +91,28 @@ func (c *Connection) initializeHeartBeats(ch Headers) (e error) {
 	}
 
 	// ========================================================================
-
-	c.hbd = w                   // OK, we are doing some kind of heartbeating
-	ct := time.Now().UnixNano() // Prime current time
+	w.shutdown = make(chan struct{}) // add shutdown channel
 
 	if w.hbs { // Finish sender parameters if required
-		sm := max(w.cx, w.sy)       // ticker interval, ms
-		w.sti = 1000000 * sm        // ticker interval, ns
-		w.ssd = make(chan struct{}) // add shutdown channel
-		w.ls = ct                   // Best guess at start
+		sm := max(w.cx, w.sy) // ticker interval, ms
+		w.sti = 1000000 * sm  // ticker interval, ns
+		c.updateSendTime()
 		// fmt.Println("start send ticker")
 		go c.sendTicker()
 	}
 
 	if w.hbr { // Finish receiver parameters if required
-		rm := max(w.sx, w.cy)       // ticker interval, ms
-		w.rti = 1000000 * rm        // ticker interval, ns
-		w.rsd = make(chan struct{}) // add shutdown channel
-		w.lr = ct                   // Best guess at start
+		rm := max(w.sx, w.cy) // ticker interval, ms
+		w.rti = 1000000 * rm  // ticker interval, ns
+		c.updateReceiveTime()
 		// fmt.Println("start receive ticker")
 		go c.receiveTicker()
 	}
+
+	c.hbdLock.Lock()
+	c.hbd = w // OK, we are doing some kind of heartbeating
+	c.hbdLock.Unlock()
+
 	return nil
 }
 
@@ -119,7 +120,6 @@ func (c *Connection) initializeHeartBeats(ch Headers) (e error) {
 	The heart beat send ticker.
 */
 func (c *Connection) sendTicker() {
-	c.hbd.sc = 0
 	ticker := time.NewTicker(time.Duration(c.hbd.sti))
 hbSend:
 	for {
@@ -132,65 +132,46 @@ hbSend:
 			c.output <- wiredata{f, r}
 			e := <-r
 			//
-			c.hbd.sdl.Lock()
-			if e != nil {
-				fmt.Printf("Heartbeat Send Failure: %v\n", e)
-				c.Hbsf = true
+			if e == nil {
+				atomic.AddInt64(&c.hbd.sc, 1)
 			} else {
-				c.Hbsf = false
-				c.hbd.sc++
+				c.log("Heartbeat Send Failure: ", e, "")
+				// \todo disconnect here...
+				return
 			}
-			c.hbd.sdl.Unlock()
-			//
-		case _ = <-c.hbd.ssd:
+		case <-c.hbd.shutdown:
 			break hbSend
-		case _ = <-c.ssdc:
-			break hbSend
+		case <-c.ssdc:
+			c.log("Heartbeat Send Shutdown", time.Now())
+			return
 		} // End of select
 	} // End of for
-	c.log("Heartbeat Send Ends", time.Now())
-	return
 }
 
 /*
 	The heart beat receive ticker.
 */
 func (c *Connection) receiveTicker() {
-	c.hbd.rc = 0
-	var first, last, nd int64
-hbGet:
 	for {
-		nd = c.hbd.rti - (last - first)
-		// Check if receives are supposed to be "fast" *and* we spent a
-		// lot of time in the previous loop.
-		if nd <= 0 {
-			nd = c.hbd.rti
-		}
-		ticker := time.NewTicker(time.Duration(nd))
 		select {
-		case ct := <-ticker.C:
-			first = time.Now().UnixNano()
-			ticker.Stop()
-			c.hbd.rdl.Lock()
-			flr := c.hbd.lr
+		case ct := <-time.After(time.Duration(c.hbd.rti)):
+			flr := atomic.LoadInt64(&c.lastReceiveTime)
 			ld := ct.UnixNano() - flr
 			c.log("HeartBeat Receive TIC", "TickerVal", ct.UnixNano(),
 				"LastReceive", flr, "Diff", ld)
-			if ld > (c.hbd.rti + (c.hbd.rti / 5)) { // swag plus to be tolerant
+			if ld > (c.hbd.rti + (c.hbd.rti / 2)) { // swag plus to be tolerant
 				c.log("HeartBeat Receive Read is dirty")
-				c.Hbrf = true // Flag possible dirty connection
+				if ld > c.hbd.rti*2 {
+					c.log("HeartBeat - connection stollen")
+					// \todo disconnect here...
+					return
+				}
 			} else {
-				c.Hbrf = false // Reset
-				c.hbd.rc++
+				atomic.AddInt64(&c.hbd.rc, 1)
 			}
-			c.hbd.rdl.Unlock()
-			last = time.Now().UnixNano()
-		case _ = <-c.hbd.rsd:
-			break hbGet
-		case _ = <-c.ssdc:
-			break hbGet
+		case <-c.hbd.shutdown:
+			c.log("Heartbeat Receive Shutdown", time.Now())
+			return
 		} // End of select
 	} // End of for
-	c.log("Heartbeat Receive Ends", time.Now())
-	return
 }

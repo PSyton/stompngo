@@ -76,13 +76,15 @@ func Connect(n net.Conn, h Headers) (*Connection, error) {
 	ch := h.Clone()
 	//fmt.Printf("CONDB01\n")
 	c := &Connection{netconn: n,
-		input:             make(chan MessageData, 1),
+		input:             make(chan Message, 1),
 		output:            make(chan wiredata),
-		connected:         false,
+		errors:            make(chan error),
+		errorsCount:       0,
+		connected:         0,
 		session:           "",
 		protocol:          SPL_10,
 		subs:              make(map[string]*subscription),
-		DisconnectReceipt: MessageData{},
+		DisconnectReceipt: Message{},
 		ssdc:              make(chan struct{}),
 		wtrsdc:            make(chan struct{}),
 		scc:               1,
@@ -92,7 +94,8 @@ func Connect(n net.Conn, h Headers) (*Connection, error) {
 	c.mets = &metrics{st: time.Now()}
 
 	// Assumed for now
-	c.MessageData = c.input
+	c.Messages = c.input
+	c.Errors = c.errors
 
 	// Check that the client wants a version we support
 	if e := c.checkClientVersions(h); e != nil {

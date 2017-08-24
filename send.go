@@ -34,7 +34,7 @@ package stompngo
 */
 func (c *Connection) Send(h Headers, b string) error {
 	c.log(SEND, "start", h)
-	if !c.connected {
+	if !c.Connected() {
 		return ECONBAD
 	}
 	e := checkHeaders(h, c.Protocol())

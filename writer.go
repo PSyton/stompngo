@@ -20,7 +20,6 @@ import (
 	"bufio"
 	"bytes"
 	"net"
-	// "bytes"
 	"strconv"
 	"time"
 )
@@ -35,7 +34,7 @@ writerLoop:
 		select {
 		case d := <-c.output:
 			c.log("WTR_WIREWRITE start")
-			c.wireWrite(d)
+			d.errchan <- c.wireWrite(&d.frame)
 			c.log("WTR_WIREWRITE COMPLETE", d.frame.Command, d.frame.Headers,
 				HexData(d.frame.Body))
 			if d.frame.Command == DISCONNECT {
@@ -50,15 +49,14 @@ writerLoop:
 		}
 	} // of for
 	//
-	c.connected = false
+	c.setConnected(false)
 	c.log("WTR_SHUTDOWN", time.Now())
 }
 
 /*
 	Connection logical write.
 */
-func (c *Connection) wireWrite(d wiredata) {
-	f := &d.frame
+func (c *Connection) wireWrite(f *Frame) error {
 	// fmt.Printf("WWD01 f:[%v]\n", f)
 	switch f.Command {
 	case "\n": // HeartBeat frame
@@ -72,34 +70,26 @@ func (c *Connection) wireWrite(d wiredata) {
 					c.dld.dlnotify(e, true)
 				}
 			}
-			d.errchan <- e
-			return
+			return e
 		}
 	default: // Other frames
 		if e := f.writeFrame(c.wtr, c); e != nil {
-			d.errchan <- e
-			return
+			return e
 		}
 		if e := c.wtr.Flush(); e != nil {
-			d.errchan <- e
-			return
+			return e
 		}
 	}
 	if e := c.wtr.Flush(); e != nil {
-		d.errchan <- e
-		return
+		return e
 	}
+
+	c.updateSendTime()
 	//
-	if c.hbd != nil {
-		c.hbd.sdl.Lock()
-		c.hbd.ls = time.Now().UnixNano() // Latest good send
-		c.hbd.sdl.Unlock()
-	}
 	c.mets.tfw++                // Frame written count
 	c.mets.tbw += f.Size(false) // Bytes written count
 	//
-	d.errchan <- nil
-	return
+	return nil
 }
 
 /*

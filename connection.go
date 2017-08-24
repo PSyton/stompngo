@@ -19,6 +19,7 @@ package stompngo
 import (
 	"log"
 	"runtime"
+	"sync/atomic"
 	"time"
 )
 
@@ -28,7 +29,15 @@ import (
 	Connected returns the current connection status.
 */
 func (c *Connection) Connected() bool {
-	return c.connected
+	return atomic.LoadInt32(&c.connected) != 0
+}
+
+func (c *Connection) setConnected(aConnected bool) {
+	if aConnected {
+		atomic.StoreInt32(&c.connected, 1)
+	} else {
+		atomic.StoreInt32(&c.connected, 0)
+	}
 }
 
 /*
@@ -66,6 +75,9 @@ func (c *Connection) SetLogger(l *log.Logger) {
 	value of zero means	no heartbeats are being sent.
 */
 func (c *Connection) SendTickerInterval() int64 {
+	c.hbdLock.Lock()
+	defer c.hbdLock.Unlock()
+
 	if c.hbd == nil {
 		return 0
 	}
@@ -77,6 +89,9 @@ func (c *Connection) SendTickerInterval() int64 {
 	A return value of zero means no heartbeats are being received.
 */
 func (c *Connection) ReceiveTickerInterval() int64 {
+	c.hbdLock.Lock()
+	defer c.hbdLock.Unlock()
+
 	if c.hbd == nil {
 		return 0
 	}
@@ -88,6 +103,9 @@ func (c *Connection) ReceiveTickerInterval() int64 {
 	zero usually indicates no send heartbeats are enabled.
 */
 func (c *Connection) SendTickerCount() int64 {
+	c.hbdLock.Lock()
+	defer c.hbdLock.Unlock()
+
 	if c.hbd == nil {
 		return 0
 	}
@@ -99,6 +117,9 @@ func (c *Connection) SendTickerCount() int64 {
 	value of zero usually indicates no read heartbeats are enabled.
 */
 func (c *Connection) ReceiveTickerCount() int64 {
+	c.hbdLock.Lock()
+	defer c.hbdLock.Unlock()
+
 	if c.hbd == nil {
 		return 0
 	}
@@ -182,19 +203,12 @@ func (c *Connection) log(v ...interface{}) {
 */
 func (c *Connection) shutdownHeartBeats() {
 	// Shutdown heartbeats if necessary
+	c.hbdLock.Lock()
 	if c.hbd != nil {
-		c.hbd.clk.Lock()
-		if !c.hbd.ssdn {
-			if c.hbd.hbs {
-				close(c.hbd.ssd)
-			}
-			if c.hbd.hbr {
-				close(c.hbd.rsd)
-			}
-			c.hbd.ssdn = true
-		}
-		c.hbd.clk.Unlock()
+		close(c.hbd.shutdown)
+		c.hbd = nil
 	}
+	c.hbdLock.Unlock()
 }
 
 /*
@@ -207,11 +221,11 @@ func (c *Connection) shutdown() {
 	// This is a write lock
 	c.subsLock.Lock()
 	for key := range c.subs {
-		close(c.subs[key].md)
+		close(c.subs[key].messages)
 		c.subs[key].cs = true
 	}
-	c.connected = false
 	c.subsLock.Unlock()
+	c.setConnected(false)
 	c.log("SHUTDOWN", "ends")
 	return
 }
@@ -219,22 +233,18 @@ func (c *Connection) shutdown() {
 /*
 	Read error handler.
 */
-func (c *Connection) handleReadError(md MessageData) {
-	c.log("HDRERR", "starts", md)
+func (c *Connection) handleWireError(err error) {
+	c.log("HDRERR", "starts", err)
+	c.setConnected(false)
 	c.shutdownHeartBeats() // We are done here
-	// Notify any general subscriber of error
-	c.input <- md
-	// Notify all individual subscribers of error
-	// This is a read lock
-	c.subsLock.RLock()
-	if c.connected {
-		for key := range c.subs {
-			c.subs[key].md <- md
-		}
+
+	// Once send error
+	if atomic.CompareAndSwapInt32(&c.errorsCount, 0, 1) {
+		c.log("HDRERR", "Send error to channel")
+		c.errors <- err
+		// Try to catch the writer
 	}
-	c.subsLock.RUnlock()
-	// Try to catch the writer
-	close(c.wtrsdc)
+
 	c.log("HDRERR", "ends")
 	// Let further shutdown logic proceed normally.
 	return

@@ -131,17 +131,12 @@ func max(a, b int64) int64 {
 /*
    Debug helper.  Get properly formatted destination.
 */
-func dumpmd(md MessageData) {
-	fmt.Printf("Command: %s\n", md.Message.Command)
+func dumpmd(msg Message) {
+	fmt.Printf("Command: %s\n", msg.Command)
 	fmt.Println("Headers:")
-	for i := 0; i < len(md.Message.Headers); i += 2 {
+	for i := 0; i < len(msg.Headers); i += 2 {
 		fmt.Printf("key:%s\t\tvalue:%s\n",
-			md.Message.Headers[i], md.Message.Headers[i+1])
+			msg.Headers[i], msg.Headers[i+1])
 	}
-	fmt.Printf("Body: %s\n", string(md.Message.Body))
-	if md.Error != nil {
-		fmt.Printf("Error: %s\n", md.Error.Error())
-	} else {
-		fmt.Println("Error: nil")
-	}
+	fmt.Printf("Body: %s\n", string(msg.Body))
 }

@@ -18,10 +18,10 @@ package stompngo
 
 import (
 	"fmt"
-	"io"
 	"net"
 	"strconv"
 	"strings"
+	"sync/atomic"
 	"time"
 )
 
@@ -47,14 +47,8 @@ readLoop:
 			"RDR_RECEIVE_ERR", e)
 		if e != nil {
 			//debug.PrintStack()
-			f.Headers = append(f.Headers, "connection_read_error", e.Error())
-			md := MessageData{Message(f), e}
-			c.handleReadError(md)
-			if e == io.EOF && !c.connected {
-				c.log("RDR_SHUTDOWN_EOF", e)
-			} else {
-				c.log("RDR_CONN_GENL_ERR", e)
-			}
+			c.handleWireError(e)
+			close(c.wtrsdc)
 			break readLoop
 		}
 
@@ -63,13 +57,12 @@ readLoop:
 		}
 
 		m := Message(f)
-		c.mets.tfr += 1 // Total frames read
+		c.mets.tfr++ // Total frames read
 		// Headers already decoded
 		c.mets.tbr += m.Size(false) // Total bytes read
 
 		//*************************************************************************
 		// Replacement START
-		md := MessageData{m, e}
 		switch f.Command {
 		//
 		case MESSAGE:
@@ -96,14 +89,14 @@ readLoop:
 			// Handle subscription draining
 			switch ps.drav {
 			case false:
-				ps.md <- md
+				ps.messages <- m
 			default:
 				ps.drmc++
 				if ps.drmc > ps.dra {
 					c.log("RDR_DROPM", ps.drmc, sid, m.Command,
 						m.Headers, HexData(m.Body))
 				} else {
-					ps.md <- md
+					ps.messages <- m
 				}
 			}
 		csRUnlock:
@@ -113,7 +106,7 @@ readLoop:
 			fallthrough
 		//
 		case RECEIPT:
-			c.input <- md
+			c.input <- m
 		//
 		default:
 			panic(fmt.Sprintf("Broker SEVERE ERROR, not STOMP? command:<%s> headers:<%v>",
@@ -131,7 +124,8 @@ readLoop:
 		c.log("RDR_RELOOP")
 	}
 	close(c.input)
-	c.connected = false
+	close(c.errors)
+	c.setConnected(false)
 	c.log("RDR_SHUTDOWN", time.Now())
 }
 
@@ -156,9 +150,9 @@ func (c *Connection) readFrame() (f Frame, e error) {
 	if s == "" {
 		return f, e
 	}
-	if c.hbd != nil {
-		c.updateHBReads()
-	}
+
+	c.updateReceiveTime()
+
 	f.Command = s[0 : len(s)-1]
 	if s == "\n" {
 		return f, e
@@ -176,9 +170,8 @@ func (c *Connection) readFrame() (f Frame, e error) {
 		if c.checkReadError(e) != nil {
 			return f, e
 		}
-		if c.hbd != nil {
-			c.updateHBReads()
-		}
+
+		c.updateReceiveTime()
 		if s == "\n" {
 			break
 		}
@@ -216,9 +209,9 @@ func (c *Connection) readFrame() (f Frame, e error) {
 	if c.checkReadError(e) != nil {
 		return f, e
 	}
-	if c.hbd != nil {
-		c.updateHBReads()
-	}
+
+	c.updateReceiveTime()
+
 	// End of read loop - set no deadline
 	if c.dld.rde {
 		_ = c.netconn.SetReadDeadline(c.dld.t0)
@@ -226,10 +219,12 @@ func (c *Connection) readFrame() (f Frame, e error) {
 	return f, e
 }
 
-func (c *Connection) updateHBReads() {
-	c.hbd.rdl.Lock()
-	c.hbd.lr = time.Now().UnixNano() // Latest good read
-	c.hbd.rdl.Unlock()
+func (c *Connection) updateReceiveTime() {
+	atomic.StoreInt64(&c.lastReceiveTime, time.Now().UnixNano())
+}
+
+func (c *Connection) updateSendTime() {
+	atomic.StoreInt64(&c.lastSendTime, time.Now().UnixNano())
 }
 
 func (c *Connection) setReadDeadline() {

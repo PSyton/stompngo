@@ -44,8 +44,6 @@ var _ = fmt.Println
 	In summary, multiple subscriptions to the same destination are not allowed
 	unless a unique "id" is supplied.
 
-	For details about the returned MessageData channel, see: https://github.com/gmallard/stompngo/wiki/subscribe-and-messagedata
-
 	Example:
 		// Possible additional Header keys: "ack", "id".
 		h := stompngo.Headers{stompngo.HK_DESTINATION, "/queue/myqueue"}
@@ -55,9 +53,9 @@ var _ = fmt.Println
 		}
 
 */
-func (c *Connection) Subscribe(h Headers) (<-chan MessageData, error) {
+func (c *Connection) Subscribe(h Headers) (<-chan Message, error) {
 	c.log(SUBSCRIBE, "start", h, c.Protocol())
-	if !c.connected {
+	if !c.Connected() {
 		return nil, ECONBAD
 	}
 	e := checkHeaders(h, c.Protocol())
@@ -83,7 +81,7 @@ func (c *Connection) Subscribe(h Headers) (<-chan MessageData, error) {
 	c.output <- wiredata{f, r}
 	e = <-r
 	c.log(SUBSCRIBE, "end", ch, c.Protocol())
-	return sub.md, e
+	return sub.messages, e
 }
 
 /*
@@ -150,12 +148,12 @@ func (c *Connection) establishSubscription(h Headers) (*subscription, error, Hea
 	if hid {
 		sd.id = id // Note user supplied id
 	}
-	sd.cs = false                         // No shutdown yet
-	sd.drav = false                       // Drain after value validity
-	sd.dra = 0                            // Never drain MESSAGE frames
-	sd.drmc = 0                           // Current drain count
-	sd.md = make(chan MessageData, c.scc) // Make subscription MD channel
-	sd.am = h.Value(HK_ACK)               // Set subscription ack mode
+	sd.cs = false                           // No shutdown yet
+	sd.drav = false                         // Drain after value validity
+	sd.dra = 0                              // Never drain MESSAGE frames
+	sd.drmc = 0                             // Current drain count
+	sd.messages = make(chan Message, c.scc) // Make subscription MD channel
+	sd.am = h.Value(HK_ACK)                 // Set subscription ack mode
 	//
 	if !hid {
 		// No caller supplied ID.  This STOMP client package supplies one.  It is the

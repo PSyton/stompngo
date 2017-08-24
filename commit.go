@@ -32,7 +32,7 @@ package stompngo
 */
 func (c *Connection) Commit(h Headers) error {
 	c.log(COMMIT, "start", h)
-	if !c.connected {
+	if !c.Connected() {
 		return ECONBAD
 	}
 	// We must have a transaction header here
