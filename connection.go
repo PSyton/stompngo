@@ -75,10 +75,7 @@ func (c *Connection) SetLogger(l *log.Logger) {
 	value of zero means	no heartbeats are being sent.
 */
 func (c *Connection) SendTickerInterval() int64 {
-	c.hbdLock.Lock()
-	defer c.hbdLock.Unlock()
-
-	if c.hbd == nil {
+	if c.hbd.hbs {
 		return 0
 	}
 	return c.hbd.sti / 1000000
@@ -89,10 +86,7 @@ func (c *Connection) SendTickerInterval() int64 {
 	A return value of zero means no heartbeats are being received.
 */
 func (c *Connection) ReceiveTickerInterval() int64 {
-	c.hbdLock.Lock()
-	defer c.hbdLock.Unlock()
-
-	if c.hbd == nil {
+	if c.hbd.hbr {
 		return 0
 	}
 	return c.hbd.rti / 1000000
@@ -103,13 +97,7 @@ func (c *Connection) ReceiveTickerInterval() int64 {
 	zero usually indicates no send heartbeats are enabled.
 */
 func (c *Connection) SendTickerCount() int64 {
-	c.hbdLock.Lock()
-	defer c.hbdLock.Unlock()
-
-	if c.hbd == nil {
-		return 0
-	}
-	return c.hbd.sc
+	return atomic.LoadInt64(&c.hbd.sendCount)
 }
 
 /*
@@ -117,13 +105,7 @@ func (c *Connection) SendTickerCount() int64 {
 	value of zero usually indicates no read heartbeats are enabled.
 */
 func (c *Connection) ReceiveTickerCount() int64 {
-	c.hbdLock.Lock()
-	defer c.hbdLock.Unlock()
-
-	if c.hbd == nil {
-		return 0
-	}
-	return c.hbd.rc
+	return atomic.LoadInt64(&c.hbd.receiveCount)
 }
 
 /*
@@ -203,12 +185,9 @@ func (c *Connection) log(v ...interface{}) {
 */
 func (c *Connection) shutdownHeartBeats() {
 	// Shutdown heartbeats if necessary
-	c.hbdLock.Lock()
-	if c.hbd != nil {
+	if atomic.CompareAndSwapInt32(&c.hbd.shutdownFlag, 0, 1) {
 		close(c.hbd.shutdown)
-		c.hbd = nil
 	}
-	c.hbdLock.Unlock()
 }
 
 /*
@@ -242,7 +221,10 @@ func (c *Connection) handleWireError(err error) {
 	if atomic.CompareAndSwapInt32(&c.errorsCount, 0, 1) {
 		c.log("HDRERR", "Send error to channel")
 		c.errors <- err
-		// Try to catch the writer
+
+		// Shutdown all
+		c.shutdown()
+		close(c.ssdc)
 	}
 
 	c.log("HDRERR", "ends")

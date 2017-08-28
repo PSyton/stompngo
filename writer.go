@@ -43,9 +43,6 @@ writerLoop:
 		case _ = <-c.ssdc:
 			c.log("WTR_WIREWRITE shutdown S received")
 			break writerLoop
-		case _ = <-c.wtrsdc:
-			c.log("WTR_WIREWRITE shutdown W received")
-			break writerLoop
 		}
 	} // of for
 	//

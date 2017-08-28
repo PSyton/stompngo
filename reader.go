@@ -48,7 +48,6 @@ readLoop:
 		if e != nil {
 			//debug.PrintStack()
 			c.handleWireError(e)
-			close(c.wtrsdc)
 			break readLoop
 		}
 
@@ -220,11 +219,11 @@ func (c *Connection) readFrame() (f Frame, e error) {
 }
 
 func (c *Connection) updateReceiveTime() {
-	atomic.StoreInt64(&c.lastReceiveTime, time.Now().UnixNano())
+	atomic.StoreInt64(&c.hbd.lastReceiveTime, time.Now().UnixNano())
 }
 
 func (c *Connection) updateSendTime() {
-	atomic.StoreInt64(&c.lastSendTime, time.Now().UnixNano())
+	atomic.StoreInt64(&c.hbd.lastSendTime, time.Now().UnixNano())
 }
 
 func (c *Connection) setReadDeadline() {

@@ -86,7 +86,6 @@ func Connect(n net.Conn, h Headers) (*Connection, error) {
 		subs:              make(map[string]*subscription),
 		DisconnectReceipt: Message{},
 		ssdc:              make(chan struct{}),
-		wtrsdc:            make(chan struct{}),
 		scc:               1,
 		dld:               &deadlineData{}}
 

@@ -195,15 +195,10 @@ type Connection struct {
 	subs              map[string]*subscription
 	subsLock          sync.RWMutex
 	ssdc              chan struct{} // System shutdown channel
-	wtrsdc            chan struct{} // Special writer shutdown channel
 	errors            chan error    // Errors channel
 	errorsCount       int32         // count of errors
 
-	hbdLock sync.Mutex // heartBeatData lock
-	hbd     *heartBeatData
-
-	lastReceiveTime int64
-	lastSendTime    int64
+	hbd heartBeatData
 
 	wtr *bufio.Writer
 	rdr *bufio.Reader
@@ -349,11 +344,6 @@ var codecValues = []codecdata{
 	subsequent control of any heartbeat routines.
 */
 type heartBeatData struct {
-	//sdl  sync.Mutex // Send data lock
-	//rdl  sync.Mutex // Receive data lock
-	//clk  sync.Mutex // Shutdown lock
-	//ssdn bool // Shutdown complete
-	//
 	cx int64 // client send value, ms
 	cy int64 // client receive value, ms
 	sx int64 // server send value, ms
@@ -364,14 +354,15 @@ type heartBeatData struct {
 	//
 	sti int64 // local sender ticker interval, ns
 	rti int64 // local receiver ticker interval, ns
-	//
-	sc int64 // local sender ticker count
-	rc int64 // local receiver ticker count
 
-	shutdown chan struct{} // shutdown channel
+	shutdownFlag int32
+	shutdown     chan struct{} // shutdown channel
 
-	//ls int64 // last send time, ns
-	//lr int64 // last receive time, ns
+	sendCount    int64
+	receiveCount int64
+
+	lastReceiveTime int64 // last send time, ns
+	lastSendTime    int64 // last receive time, ns
 }
 
 /*

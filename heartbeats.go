@@ -41,21 +41,23 @@ func (c *Connection) initializeHeartBeats(ch Headers) (e error) {
 		return nil
 	}
 	// Work area, may or may not become connection heartbeat data
-	w := &heartBeatData{cx: 0, cy: 0, sx: 0, sy: 0,
+	c.hbd = heartBeatData{cx: 0, cy: 0, sx: 0, sy: 0,
 		hbs: true, hbr: true, // possible reset later
 		sti: 0, rti: 0,
-		sc: 0, rc: 0}
+		shutdown:  make(chan struct{}),
+		sendCount: 0, receiveCount: 0,
+		shutdownFlag: 0}
 
 	// Client specified values
 	cp := strings.Split(vc, ",")
 	if len(cp) != 2 { // S/B caught by the server first
 		return Error("invalid client heart-beat header: " + vc)
 	}
-	w.cx, e = strconv.ParseInt(cp[0], 10, 64)
+	c.hbd.cx, e = strconv.ParseInt(cp[0], 10, 64)
 	if e != nil {
 		return Error("non-numeric cx heartbeat value: " + cp[0])
 	}
-	w.cy, e = strconv.ParseInt(cp[1], 10, 64)
+	c.hbd.cy, e = strconv.ParseInt(cp[1], 10, 64)
 	if e != nil {
 		return Error("non-numeric cy heartbeat value: " + cp[1])
 	}
@@ -65,53 +67,43 @@ func (c *Connection) initializeHeartBeats(ch Headers) (e error) {
 	if len(sp) != 2 {
 		return Error("invalid server heart-beat header: " + vs)
 	}
-	w.sx, e = strconv.ParseInt(sp[0], 10, 64)
+	c.hbd.sx, e = strconv.ParseInt(sp[0], 10, 64)
 	if e != nil {
 		return Error("non-numeric sx heartbeat value: " + sp[0])
 	}
-	w.sy, e = strconv.ParseInt(sp[1], 10, 64)
+	c.hbd.sy, e = strconv.ParseInt(sp[1], 10, 64)
 	if e != nil {
 		return Error("non-numeric sy heartbeat value: " + sp[1])
 	}
 
 	// Check for sending needed
-	if w.cx == 0 || w.sy == 0 {
-		w.hbs = false //
-	}
+	c.hbd.hbs = (c.hbd.cx > 0 && c.hbd.sy > 0)
 
 	// Check for receiving needed
-	if w.sx == 0 || w.cy == 0 {
-		w.hbr = false //
-	}
+	c.hbd.hbr = (c.hbd.sx > 0 && c.hbd.cy > 0)
 
 	// ========================================================================
-
-	if !w.hbs && !w.hbr {
+	if !c.hbd.hbs && !c.hbd.hbr {
 		return nil // none required
 	}
 
 	// ========================================================================
-	w.shutdown = make(chan struct{}) // add shutdown channel
 
-	if w.hbs { // Finish sender parameters if required
-		sm := max(w.cx, w.sy) // ticker interval, ms
-		w.sti = 1000000 * sm  // ticker interval, ns
+	if c.hbd.hbs { // Finish sender parameters if required
+		sm := max(c.hbd.cx, c.hbd.sy) // ticker interval, ms
+		c.hbd.sti = 1000000 * sm      // ticker interval, ns
 		c.updateSendTime()
 		// fmt.Println("start send ticker")
 		go c.sendTicker()
 	}
 
-	if w.hbr { // Finish receiver parameters if required
-		rm := max(w.sx, w.cy) // ticker interval, ms
-		w.rti = 1000000 * rm  // ticker interval, ns
+	if c.hbd.hbr { // Finish receiver parameters if required
+		rm := max(c.hbd.sx, c.hbd.cy) // ticker interval, ms
+		c.hbd.rti = 1000000 * rm      // ticker interval, ns
 		c.updateReceiveTime()
 		// fmt.Println("start receive ticker")
 		go c.receiveTicker()
 	}
-
-	c.hbdLock.Lock()
-	c.hbd = w // OK, we are doing some kind of heartbeating
-	c.hbdLock.Unlock()
 
 	return nil
 }
@@ -120,12 +112,23 @@ func (c *Connection) initializeHeartBeats(ch Headers) (e error) {
 	The heart beat send ticker.
 */
 func (c *Connection) sendTicker() {
-	ticker := time.NewTicker(time.Duration(c.hbd.sti))
-hbSend:
+	interval := c.hbd.sti
+
 	for {
 		select {
-		case <-ticker.C:
+		case curTime := <-time.After(time.Duration(interval)):
+			lastSend := atomic.LoadInt64(&c.hbd.lastSendTime)
+			diff := curTime.UnixNano() - lastSend
+
+			c.log("HeartBeat Send TIC", "TickerVal", curTime.UnixNano(),
+				"LastSend", lastSend, "diff", diff/1000000)
+
+			if diff < c.hbd.sti {
+				interval = c.hbd.sti - diff
+				continue
+			}
 			c.log("HeartBeat Send data")
+			interval = c.hbd.sti
 			// Send a heartbeat
 			f := Frame{"\n", Headers{}, NULLBUFF} // Heartbeat frame
 			r := make(chan error)
@@ -133,16 +136,17 @@ hbSend:
 			e := <-r
 			//
 			if e == nil {
-				atomic.AddInt64(&c.hbd.sc, 1)
+				atomic.AddInt64(&c.hbd.sendCount, 1)
 			} else {
 				c.log("Heartbeat Send Failure: ", e, "")
-				// \todo disconnect here...
+				c.handleWireError(e)
 				return
 			}
 		case <-c.hbd.shutdown:
-			break hbSend
+			c.log("Heartbeat Send Shutdown from 'shutdown'", time.Now())
+			return
 		case <-c.ssdc:
-			c.log("Heartbeat Send Shutdown", time.Now())
+			c.log("Heartbeat Send Shutdown from 'ssdc'", time.Now())
 			return
 		} // End of select
 	} // End of for
@@ -155,19 +159,18 @@ func (c *Connection) receiveTicker() {
 	for {
 		select {
 		case ct := <-time.After(time.Duration(c.hbd.rti)):
-			flr := atomic.LoadInt64(&c.lastReceiveTime)
+			flr := atomic.LoadInt64(&c.hbd.lastReceiveTime)
 			ld := ct.UnixNano() - flr
 			c.log("HeartBeat Receive TIC", "TickerVal", ct.UnixNano(),
-				"LastReceive", flr, "Diff", ld)
+				"LastReceive", flr, "Diff", ld/1000000)
 			if ld > (c.hbd.rti + (c.hbd.rti / 2)) { // swag plus to be tolerant
 				c.log("HeartBeat Receive Read is dirty")
 				if ld > c.hbd.rti*2 {
 					c.log("HeartBeat - connection stollen")
-					// \todo disconnect here...
 					return
 				}
 			} else {
-				atomic.AddInt64(&c.hbd.rc, 1)
+				atomic.AddInt64(&c.hbd.receiveCount, 1)
 			}
 		case <-c.hbd.shutdown:
 			c.log("Heartbeat Receive Shutdown", time.Now())
