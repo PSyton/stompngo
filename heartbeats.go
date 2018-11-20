@@ -132,7 +132,9 @@ func (c *Connection) sendTicker() {
 			// Send a heartbeat
 			f := Frame{"\n", Headers{}, NULLBUFF} // Heartbeat frame
 			r := make(chan error)
-			c.output <- wiredata{f, r}
+			if e := c.writeWireData(wiredata{f, r}); e != nil {
+				return
+			}
 			e := <-r
 			//
 			if e == nil {
@@ -167,6 +169,7 @@ func (c *Connection) receiveTicker() {
 				c.log("HeartBeat Receive Read is dirty")
 				if ld > c.hbd.rti*2 {
 					c.log("HeartBeat - connection stollen")
+					c.handleWireError(ECONNSTOLEN)
 					return
 				}
 			} else {

@@ -25,6 +25,20 @@ import (
 )
 
 /*
+	Write data to logical network writer.  Writer will take care of the output wire data.
+	If the underlying connection goes bad and writer give up working, the closed ssdc chan
+	will make sure write action aware that happens.
+*/
+func (c *Connection) writeWireData(wd wiredata) error {
+	select {
+	case c.output <- wd:
+	case <-c.ssdc:
+		return ECONBAD
+	}
+	return nil
+}
+
+/*
 	Logical network writer.  Read wiredata structures from the communication
 	channel, and put the frame on the wire.
 */
@@ -43,10 +57,14 @@ writerLoop:
 		case _ = <-c.ssdc:
 			c.log("WTR_WIREWRITE shutdown S received")
 			break writerLoop
+		case _ = <-c.wtrsdc:
+			c.log("WTR_WIREWRITE shutdown W received")
+			break writerLoop
 		}
 	} // of for
 	//
 	c.setConnected(false)
+	c.sysAbort()
 	c.log("WTR_SHUTDOWN", time.Now())
 }
 
@@ -57,7 +75,7 @@ func (c *Connection) wireWrite(f *Frame) error {
 	// fmt.Printf("WWD01 f:[%v]\n", f)
 	switch f.Command {
 	case "\n": // HeartBeat frame
-		if c.dld.wde && c.dld.dns {
+		if c.dld.wde && c.dld.wds {
 			_ = c.netconn.SetWriteDeadline(time.Now().Add(c.dld.wdld))
 		}
 		_, e := c.wtr.WriteString(f.Command)
@@ -134,7 +152,7 @@ func (f *Frame) writeFrame(w *bufio.Writer, c *Connection) error {
 		}
 	}
 
-	if c.dld.wde && c.dld.dns {
+	if c.dld.wde && c.dld.wds {
 		_ = c.netconn.SetWriteDeadline(time.Now().Add(c.dld.wdld))
 	}
 
@@ -148,7 +166,7 @@ func (f *Frame) writeFrame(w *bufio.Writer, c *Connection) error {
 	// fmt.Println("WRCMD", f.Command)
 	// Write the frame Headers
 	for i := 0; i < len(f.Headers); i += 2 {
-		if c.dld.wde && c.dld.dns {
+		if c.dld.wde && c.dld.wds {
 			_ = c.netconn.SetWriteDeadline(time.Now().Add(c.dld.wdld))
 		}
 		_, e := w.WriteString(f.Headers[i] + ":" + f.Headers[i+1] + "\n")
@@ -159,7 +177,7 @@ func (f *Frame) writeFrame(w *bufio.Writer, c *Connection) error {
 	}
 
 	// Write the last Header LF
-	if c.dld.wde && c.dld.dns {
+	if c.dld.wde && c.dld.wds {
 		_ = c.netconn.SetWriteDeadline(time.Now().Add(c.dld.wdld))
 	}
 	e = w.WriteByte('\n')
@@ -176,7 +194,7 @@ func (f *Frame) writeFrame(w *bufio.Writer, c *Connection) error {
 			return e
 		}
 	}
-	if c.dld.wde && c.dld.dns {
+	if c.dld.wde && c.dld.wds {
 		_ = c.netconn.SetWriteDeadline(time.Now().Add(c.dld.wdld))
 	}
 	e = w.WriteByte(0)
@@ -212,7 +230,7 @@ func (c *Connection) writeBody(f *Frame) error {
 	var n = 0
 	var e error
 	for {
-		if c.dld.wde && c.dld.dns {
+		if c.dld.wde && c.dld.wds {
 			_ = c.netconn.SetWriteDeadline(time.Now().Add(c.dld.wdld))
 		}
 		n, e = c.wtr.Write(f.Body)
@@ -226,7 +244,7 @@ func (c *Connection) writeBody(f *Frame) error {
 		if !c.dld.rfsw {
 			return e
 		}
-		if c.dld.wde && c.dld.dns && isErrorTimeout(e) {
+		if c.dld.wde && c.dld.wds && c.dld.dns && isErrorTimeout(e) {
 			c.log("invoking write deadline callback 2")
 			c.dld.dlnotify(e, true)
 		}

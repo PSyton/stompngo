@@ -195,6 +195,7 @@ type Connection struct {
 	subs              map[string]*subscription
 	subsLock          sync.RWMutex
 	ssdc              chan struct{} // System shutdown channel
+	abortOnce         sync.Once     // Ensure close ssdc once
 	errors            chan error    // Errors channel
 	errorsCount       int32         // count of errors
 
@@ -308,6 +309,9 @@ const (
 
 	// Invalid broker command
 	EINVBCMD = Error("invalid broker command")
+
+        // Connection stollen
+	ECONNSTOLEN = Error("Connection stollen")
 )
 
 /*

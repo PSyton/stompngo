@@ -35,7 +35,7 @@ var (
 
 	minor = "0" // Minor
 
-	patch = "8" // Patch
+	patch = "9" // Patch
 
 	//patch = "8.plvl.001" // Patch
 )

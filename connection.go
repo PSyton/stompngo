@@ -210,7 +210,15 @@ func (c *Connection) shutdown() {
 }
 
 /*
-	Read error handler.
+	Connection Abort logic. Shutdown connection system on problem happens
+*/
+func (c *Connection) sysAbort() {
+	c.abortOnce.Do(func() { close(c.ssdc) })
+	return
+}
+
+/*
+	Write error handler.
 */
 func (c *Connection) handleWireError(err error) {
 	c.log("HDRERR", "starts", err)
@@ -224,7 +232,7 @@ func (c *Connection) handleWireError(err error) {
 
 		// Shutdown all
 		c.shutdown()
-		close(c.ssdc)
+		c.sysAbort()
 	}
 
 	c.log("HDRERR", "ends")

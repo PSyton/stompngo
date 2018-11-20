@@ -35,18 +35,11 @@ func (c *Connection) reader() {
 readLoop:
 	for {
 		f, e := c.readFrame()
-		//
-		select {
-		case _ = <-c.ssdc:
-			c.log("RDR_SHUTDOWN detected")
-			break readLoop
-		default:
-		}
-		//
+		logLock.Lock()
 		c.log("RDR_RECEIVE_FRAME", f.Command, f.Headers, HexData(f.Body),
 			"RDR_RECEIVE_ERR", e)
+		logLock.Unlock()
 		if e != nil {
-			//debug.PrintStack()
 			c.handleWireError(e)
 			break readLoop
 		}
@@ -114,17 +107,12 @@ readLoop:
 		// Replacement END
 		//*************************************************************************
 
-		select {
-		case _ = <-c.ssdc:
-			c.log("RDR_SHUTDOWN detected")
-			break readLoop
-		default:
-		}
 		c.log("RDR_RELOOP")
 	}
 	close(c.input)
 	close(c.errors)
 	c.setConnected(false)
+	c.sysAbort()
 	c.log("RDR_SHUTDOWN", time.Now())
 }
 
