@@ -22,8 +22,8 @@ import (
 	"net"
 	"os"
 	//
-	sng "github.com/gmallard/stompngo"
-	"github.com/gmallard/stompngo/senv"
+	sng "github.com/psyton/stompngo"
+	"github.com/psyton/stompngo/senv"
 )
 
 func main() {
