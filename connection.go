@@ -218,7 +218,7 @@ func (c *Connection) sysAbort() {
 }
 
 /*
-	Write error handler.
+	Wire error handler.
 */
 func (c *Connection) handleWireError(err error) {
 	c.log("HDRERR", "starts", err)

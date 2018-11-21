@@ -49,16 +49,17 @@ writerLoop:
 		case d := <-c.output:
 			c.log("WTR_WIREWRITE start")
 			d.errchan <- c.wireWrite(&d.frame)
-			c.log("WTR_WIREWRITE COMPLETE", d.frame.Command, d.frame.Headers,
-				HexData(d.frame.Body))
+			logLock.Lock()
+			if c.logger != nil {
+				c.log("WTR_WIREWRITE COMPLETE", d.frame.Command, d.frame.Headers,
+					HexData(d.frame.Body))
+			}
+			logLock.Unlock()
 			if d.frame.Command == DISCONNECT {
 				break writerLoop // we are done with this connection
 			}
 		case _ = <-c.ssdc:
 			c.log("WTR_WIREWRITE shutdown S received")
-			break writerLoop
-		case _ = <-c.wtrsdc:
-			c.log("WTR_WIREWRITE shutdown W received")
 			break writerLoop
 		}
 	} // of for
