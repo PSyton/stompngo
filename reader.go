@@ -35,10 +35,8 @@ func (c *Connection) reader() {
 readLoop:
 	for {
 		f, e := c.readFrame()
-		logLock.Lock()
 		c.log("RDR_RECEIVE_FRAME", f.Command, f.Headers, HexData(f.Body),
 			"RDR_RECEIVE_ERR", e)
-		logLock.Unlock()
 		if e != nil {
 			c.handleWireError(e)
 			break readLoop

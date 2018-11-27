@@ -205,6 +205,8 @@ type Connection struct {
 	rdr *bufio.Reader
 
 	logger     *log.Logger
+	loggerLock sync.Mutex
+
 	mets       *metrics      // Client metrics
 	scc        int           // Subscribe channel capacity
 	disconnect int32         // Disconnect lock
@@ -310,7 +312,7 @@ const (
 	// Invalid broker command
 	EINVBCMD = Error("invalid broker command")
 
-        // Connection stollen
+	// Connection stollen
 	ECONNSTOLEN = Error("Connection stollen")
 )
 
@@ -384,8 +386,6 @@ type metrics struct {
   Valid broker commands.
 */
 var validCmds = map[string]bool{MESSAGE: true, ERROR: true, RECEIPT: true}
-
-var logLock sync.Mutex
 
 const (
 	NetProtoTCP = "tcp" // Protocol Name

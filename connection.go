@@ -65,9 +65,10 @@ func (c *Connection) Protocol() string {
 		c.SetLogger(l)
 */
 func (c *Connection) SetLogger(l *log.Logger) {
-	logLock.Lock()
+	c.loggerLock.Lock()
+	defer c.loggerLock.Unlock()
+
 	c.logger = l
-	logLock.Unlock()
 }
 
 /*
@@ -165,8 +166,8 @@ func (c *Connection) SetSubChanCap(nc int) {
 	Log data if possible.
 */
 func (c *Connection) log(v ...interface{}) {
-	logLock.Lock()
-	defer logLock.Unlock()
+	c.loggerLock.Lock()
+	defer c.loggerLock.Unlock()
 	if c.logger == nil {
 		return
 	}

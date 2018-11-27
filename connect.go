@@ -119,7 +119,7 @@ func Connect(n net.Conn, h Headers) (*Connection, error) {
 	//
 	e = c.connectHandler(ch)
 	if e != nil {
-		c.sysAbort() // Shutdown ,  we are done with errors
+		c.sysAbort() // Shutdown , we are done with errors
 		return c, e
 	}
 	//fmt.Printf("CONDB04\n")

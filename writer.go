@@ -43,18 +43,15 @@ func (c *Connection) writeWireData(wd wiredata) error {
 	channel, and put the frame on the wire.
 */
 func (c *Connection) writer() {
+	c.log("WTR_START")
 writerLoop:
 	for {
 		select {
 		case d := <-c.output:
 			c.log("WTR_WIREWRITE start")
 			d.errchan <- c.wireWrite(&d.frame)
-			logLock.Lock()
-			if c.logger != nil {
-				c.log("WTR_WIREWRITE COMPLETE", d.frame.Command, d.frame.Headers,
-					HexData(d.frame.Body))
-			}
-			logLock.Unlock()
+			c.log("WTR_WIREWRITE COMPLETE", d.frame.Command, d.frame.Headers,
+				HexData(d.frame.Body))
 			if d.frame.Command == DISCONNECT {
 				break writerLoop // we are done with this connection
 			}
