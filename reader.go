@@ -37,6 +37,7 @@ readLoop:
 		f, e := c.readFrame()
 		c.log("RDR_RECEIVE_FRAME", f.Command, f.Headers, HexData(f.Body),
 			"RDR_RECEIVE_ERR", e)
+
 		if e != nil {
 			c.handleWireError(e)
 			break readLoop
@@ -111,6 +112,15 @@ readLoop:
 	close(c.errors)
 	c.setConnected(false)
 	c.sysAbort()
+
+	c.log("RDR_SHUTDOWN", "close all subs")
+
+	c.subsLock.Lock()
+	for _, sub := range c.subs {
+		close(sub.messages)
+	}
+	c.subsLock.Unlock()
+
 	c.log("RDR_SHUTDOWN", time.Now())
 }
 

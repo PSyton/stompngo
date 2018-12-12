@@ -77,6 +77,7 @@ func (c *Connection) Disconnect(h Headers) error {
 	//
 	r := make(chan error)
 	if e = c.writeWireData(wiredata{f, r}); e != nil {
+                c.log(DISCONNECT, "Write data error", e)
 		// Drive shutdown logic
 		c.shutdown()
 		c.sysAbort()
@@ -92,6 +93,6 @@ func (c *Connection) Disconnect(h Headers) error {
 	c.log(DISCONNECT, "ends", ch)
 	c.shutdown()
 	c.sysAbort()
-	c.log(DISCONNECT, "system shutdown cannel closed")
+	c.log(DISCONNECT, "system shutdown channel closed")
 	return e
 }

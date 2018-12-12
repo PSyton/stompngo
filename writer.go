@@ -210,6 +210,7 @@ func (c *Connection) checkWriteError(e error) error {
 	if e == nil {
 		return e
 	}
+        c.log("Write error: %s", e)
 	ne, ok := e.(net.Error)
 	if !ok {
 		return e

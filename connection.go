@@ -201,8 +201,8 @@ func (c *Connection) shutdown() {
 	// This is a write lock
 	c.subsLock.Lock()
 	for key := range c.subs {
-		close(c.subs[key].messages)
 		c.subs[key].cs = true
+		//close(c.subs[key].messages)
 	}
 	c.subsLock.Unlock()
 	c.setConnected(false)
@@ -223,6 +223,12 @@ func (c *Connection) sysAbort() {
 */
 func (c *Connection) handleWireError(err error) {
 	c.log("HDRERR", "starts", err)
+	if !c.Connected() {
+		c.log("HDRERR", "Already disconnected")
+		return
+        }
+
+	c.log("HDRERR", "Set disconnected.")
 	c.setConnected(false)
 	c.shutdownHeartBeats() // We are done here
 
